@@ -9,11 +9,16 @@ from langchain_core.language_models import BaseChatModel
 from contributor_copilot.answer import Citation
 from contributor_copilot.bm25 import BM25Index
 from contributor_copilot.config import Settings
-from contributor_copilot.dense import ChromaStore, SentenceTransformerEmbedder, collection_name
+from contributor_copilot.dense import (
+    ChromaStore,
+    Embedder,
+    SentenceTransformerEmbedder,
+    collection_name,
+)
 from contributor_copilot.graph import build_graph
 from contributor_copilot.ingest import build_chunks
 from contributor_copilot.llm import get_llm
-from contributor_copilot.rerank import CrossEncoderReranker
+from contributor_copilot.rerank import CrossEncoderReranker, Reranker
 from contributor_copilot.retriever import HybridRetriever
 
 
@@ -56,7 +61,12 @@ class Copilot:
         )
 
 
-def build_retriever(settings: Settings) -> HybridRetriever:
+def build_retriever(
+    settings: Settings,
+    embedder: Embedder | None = None,
+    reranker: Reranker | None = None,
+) -> HybridRetriever:
+    """Build chunks and indexes. Pass embedder/reranker to reuse loaded models."""
     chunks = build_chunks(
         settings.corpus_dir,
         settings.repo_url,
@@ -66,10 +76,13 @@ def build_retriever(settings: Settings) -> HybridRetriever:
     )
     dense = None
     if settings.embeddings == "bge":
-        embedder = SentenceTransformerEmbedder(settings.embedding_model)
+        embedder = embedder or SentenceTransformerEmbedder(settings.embedding_model)
         name = collection_name(embedder.name, settings.chunk_size, settings.chunk_overlap)
         dense = ChromaStore(chunks, embedder, settings.index_dir / "chroma", name)
-    reranker = CrossEncoderReranker(settings.rerank_model) if settings.rerank else None
+    if settings.rerank:
+        reranker = reranker or CrossEncoderReranker(settings.rerank_model)
+    else:
+        reranker = None
     return HybridRetriever(
         BM25Index(chunks),
         dense=dense,
