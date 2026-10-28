@@ -97,4 +97,4 @@ class ChromaStore:
             include=["distances"],
         )
         ids, distances = result["ids"][0], result["distances"][0]
-        return [Hit(self._by_id[i], 1.0 - d) for i, d in zip(ids, distances) if i in self._by_id]
+        return [Hit(self._by_id[i], 1.0 - d) for i, d in zip(ids, distances, strict=True) if i in self._by_id]

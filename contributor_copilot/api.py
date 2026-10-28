@@ -34,9 +34,9 @@ def create_app(copilot: Copilot | None = None, settings: Settings | None = None)
         try:
             return app.state.copilot.ask(request.question.strip())
         except (httpx.ConnectError, ConnectionError) as error:
-            raise HTTPException(503, f"LLM backend unreachable. Is Ollama running? ({error})")
+            raise HTTPException(503, f"LLM backend unreachable. Is Ollama running? ({error})") from error
         except ResponseError as error:
-            raise HTTPException(502, f"LLM backend error: {error}")
+            raise HTTPException(502, f"LLM backend error: {error}") from error
 
     @app.get("/health")
     def health() -> dict:

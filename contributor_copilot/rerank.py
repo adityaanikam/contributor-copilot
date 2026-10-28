@@ -31,5 +31,5 @@ class CrossEncoderReranker:
         if not chunks:
             return []
         scores = self._model.predict([(query, c.search_text) for c in chunks])
-        hits = [Hit(c, float(s)) for c, s in zip(chunks, scores)]
+        hits = [Hit(c, float(s)) for c, s in zip(chunks, scores, strict=True)]
         return sorted(hits, key=lambda h: h.score, reverse=True)

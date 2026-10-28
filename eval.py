@@ -124,7 +124,7 @@ def run(args: argparse.Namespace, base: Settings) -> list[dict]:
                 "embedding_model": settings.embedding_model if settings.embeddings == "bge" else "",
                 "rerank_model": settings.rerank_model if settings.rerank else "",
                 "llm_provider": "" if llm is None else settings.llm_provider,
-                "llm_model": settings.ollama_model if llm is not None and settings.llm_provider == "ollama" else "",
+                "llm_model": settings.ollama_model if llm and settings.llm_provider == "ollama" else "",
                 "top_k": settings.top_k,
                 "candidates": settings.candidates,
             }
