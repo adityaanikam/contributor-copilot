@@ -6,7 +6,7 @@ from contributor_copilot.config import Settings
 from contributor_copilot.fake_llm import FakeChatModel, make_fake_llm, sentences
 from contributor_copilot.ingest import Chunk
 from contributor_copilot.llm import get_llm
-from contributor_copilot.prompts import I_DONT_KNOW, answer_messages
+from contributor_copilot.prompts import I_DONT_KNOW, answer_messages, grade_messages, rewrite_messages
 
 
 def _hits(*texts):
@@ -21,6 +21,22 @@ def test_answers_with_best_matching_sentence_and_citation():
     hits = _hits("Unrelated text here.", "The probe can take up to five seconds. Other stuff.")
     reply = llm.invoke(answer_messages("How many seconds can the probe take?", hits))
     assert reply.content == "The probe can take up to five seconds. [2]"
+
+
+def test_grade_accepts_extracted_sentence_and_rejects_others():
+    llm = make_fake_llm()
+    hits = _hits("The probe can take up to five\nseconds. Other stuff.")
+    assert llm.invoke(grade_messages(hits, "The probe can take up to five seconds. [1]")).content == "YES"
+    assert llm.invoke(grade_messages(hits, "The probe takes an hour. [1]")).content == "NO"
+    assert llm.invoke(grade_messages(hits, "The probe can take up to five seconds.")).content == "NO"
+    assert llm.invoke(grade_messages(hits, "The probe can take up to five seconds. [4]")).content == "NO"
+
+
+def test_rewrite_returns_question_then_keywords_on_retry():
+    llm = make_fake_llm()
+    assert llm.invoke(rewrite_messages("How do I run tests?")).content == "How do I run tests?"
+    retry = llm.invoke(rewrite_messages("How do I run tests?", previous_query="How do I run tests?"))
+    assert retry.content == "run tests"
 
 
 def test_says_idk_when_nothing_matches():
