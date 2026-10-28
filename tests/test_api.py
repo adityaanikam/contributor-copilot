@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from contributor_copilot.api import create_app
 from contributor_copilot.config import Settings
 from contributor_copilot.fake_llm import FakeChatModel
-from contributor_copilot.service import build_copilot
+from contributor_copilot.service import Copilot, build_retriever
 
 
 @pytest.fixture
@@ -44,6 +44,17 @@ def test_ask_returns_answer_with_file_citation(client):
     assert citation["location"].startswith(citation["source"] + ":")
     assert citation["url"].startswith("https://github.com/microsoft/apm/blob/main/")
     assert len(body["retrieved"]) == 5
+    assert body["grounded"] is True
+    assert body["attempts"] == 1
+    assert len(body["queries"]) == 1
+
+
+def test_off_topic_question_gets_i_dont_know_after_one_retry(client):
+    body = client.post("/ask", json={"question": "What is the capital of France?"}).json()
+    assert body["answer"] == "I don't know based on the provided sources."
+    assert body["citations"] == []
+    assert body["grounded"] is False
+    assert body["attempts"] == 2
 
 
 def test_ask_rejects_empty_question(client):
@@ -51,12 +62,10 @@ def test_ask_rejects_empty_question(client):
 
 
 def test_unreachable_llm_returns_503(settings):
-    copilot = build_copilot(settings)
-
     def refuse(messages):
         raise httpx.ConnectError("Connection refused")
 
-    copilot.llm = FakeChatModel(respond=refuse)
+    copilot = Copilot(build_retriever(settings), FakeChatModel(respond=refuse))
     with TestClient(create_app(copilot=copilot)) as client:
         response = client.post("/ask", json={"question": "What does apm doctor check?"})
     assert response.status_code == 503
