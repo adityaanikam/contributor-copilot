@@ -40,6 +40,7 @@ class AskResult:
     attempts: int
     usage: Usage
     queries: list[str] = field(default_factory=list)
+    flagged_sources: list[str] = field(default_factory=list)
     retrieved: list[RetrievedSource] = field(default_factory=list)
 
 
@@ -50,11 +51,14 @@ class Copilot:
         llm: BaseChatModel,
         max_attempts: int = 2,
         log_path: Path | None = None,
+        sanitize_sources: bool = True,
     ):
         self.retriever = retriever
         self.llm = llm
         self.log_path = log_path
-        self.graph = build_graph(retriever, llm, max_attempts=max_attempts)
+        self.graph = build_graph(
+            retriever, llm, max_attempts=max_attempts, sanitize_sources=sanitize_sources
+        )
 
     def ask(self, question: str) -> AskResult:
         """Run the graph, then log tokens and latency (also when it fails)."""
@@ -72,6 +76,7 @@ class Copilot:
             attempts=state["attempts"],
             usage=trace.usage(),
             queries=state["queries"],
+            flagged_sources=state["flagged_sources"],
             retrieved=[
                 RetrievedSource(h.chunk.location, h.chunk.section, h.score) for h in state["hits"]
             ],
@@ -83,6 +88,7 @@ class Copilot:
                 citations=[c.location for c in result.citations],
                 grounded=result.grounded,
                 attempts=result.attempts,
+                flagged_sources=result.flagged_sources,
             )
         )
         return result

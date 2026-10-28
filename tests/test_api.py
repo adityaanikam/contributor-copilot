@@ -47,6 +47,7 @@ def test_ask_returns_answer_with_file_citation(client):
     assert body["grounded"] is True
     assert body["attempts"] == 1
     assert len(body["queries"]) == 1
+    assert body["flagged_sources"] == []
 
 
 def test_ask_reports_and_logs_tokens_and_latency(client, settings):

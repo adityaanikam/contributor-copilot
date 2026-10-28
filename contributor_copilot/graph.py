@@ -19,6 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from contributor_copilot.answer import CITATION_RE, Citation, generate_answer, is_idk
 from contributor_copilot.bm25 import Hit
+from contributor_copilot.guardrails import sanitize_hits
 from contributor_copilot.prompts import I_DONT_KNOW, grade_messages, rewrite_messages
 from contributor_copilot.retriever import HybridRetriever
 from contributor_copilot.telemetry import RequestTrace
@@ -29,6 +30,7 @@ class State(TypedDict, total=False):
     query: str  # latest rewritten query
     queries: list[str]  # every rewritten query, in order
     hits: list[Hit]
+    flagged_sources: list[str]  # chunks the guardrail redacted
     answer: str
     citations: list[Citation]
     grounded: bool
@@ -50,8 +52,16 @@ def _timed(name: str, node: Callable[[State, RequestTrace], State]):
     return run
 
 
-def build_graph(retriever: HybridRetriever, llm: BaseChatModel, max_attempts: int = 2):
-    """Compile the graph. max_attempts=2 means the first try plus one retry."""
+def build_graph(
+    retriever: HybridRetriever,
+    llm: BaseChatModel,
+    max_attempts: int = 2,
+    sanitize_sources: bool = True,
+):
+    """Compile the graph. max_attempts=2 means the first try plus one retry.
+
+    sanitize_sources=False turns the injection guardrail off; only tests do that.
+    """
 
     def rewrite(state: State, trace: RequestTrace) -> State:
         messages = rewrite_messages(state["question"], state.get("query"))
@@ -68,7 +78,12 @@ def build_graph(retriever: HybridRetriever, llm: BaseChatModel, max_attempts: in
         # Fuse the original question with the rewrite so a bad rewrite cannot
         # lose what the question alone would find. Rerank against the question.
         queries = [state["question"], state["query"]]
-        return {"hits": retriever.retrieve(queries, rerank_query=state["question"])}
+        hits = retriever.retrieve(queries, rerank_query=state["question"])
+        flagged: list[str] = []
+        if sanitize_sources:
+            hits, flagged = sanitize_hits(hits)
+        seen = state.get("flagged_sources", [])
+        return {"hits": hits, "flagged_sources": seen + [f for f in flagged if f not in seen]}
 
     def generate(state: State, trace: RequestTrace) -> State:
         answer = generate_answer(state["question"], state["hits"], llm, trace)
