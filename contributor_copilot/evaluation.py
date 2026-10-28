@@ -162,6 +162,8 @@ def log_run(
     """Log one configuration as an MLflow run in a local file store. Returns the run id."""
     # MLflow 3.x keeps the file store behind an opt-in flag; we want plain files.
     os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+    # Keep evaluation fully local: no usage telemetry to mlflow.org.
+    os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
     import mlflow
 
     mlflow.set_tracking_uri(tracking_dir.resolve().as_uri())
