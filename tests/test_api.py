@@ -49,6 +49,17 @@ def test_ask_returns_answer_with_file_citation(client):
     assert len(body["queries"]) == 1
 
 
+def test_ask_reports_and_logs_tokens_and_latency(client, settings):
+    body = client.post("/ask", json={"question": "How long can the apm doctor network probe take?"}).json()
+    usage = body["usage"]
+    assert usage["llm_calls"] == 3
+    assert usage["input_tokens"] > 0 and usage["output_tokens"] > 0
+    assert usage["latency_ms"] > 0
+    assert [s["stage"] for s in usage["stages"]] == ["rewrite", "retrieve", "generate", "check"]
+    [line] = settings.log_path.read_text(encoding="utf-8").splitlines()
+    assert usage["request_id"] in line
+
+
 def test_off_topic_question_gets_i_dont_know_after_one_retry(client):
     body = client.post("/ask", json={"question": "What is the capital of France?"}).json()
     assert body["answer"] == "I don't know based on the provided sources."

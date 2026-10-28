@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
@@ -123,9 +122,7 @@ def evaluate_answers(
 ) -> tuple[dict[str, float], list[dict]]:
     rows = []
     for q in questions:
-        started = time.perf_counter()
         result = copilot.ask(q.question)
-        latency_ms = (time.perf_counter() - started) * 1000
         cited = [c.source for c in result.citations]
         if q.answerable:
             key_fact = key_fact_recall(result.answer, q.key_facts)
@@ -144,10 +141,13 @@ def evaluate_answers(
                 "idk": 1.0 if is_idk(result.answer) else 0.0,
                 "grounded": 1.0 if result.grounded else 0.0,
                 "attempts": result.attempts,
-                "latency_ms": latency_ms,
+                "latency_ms": result.usage.latency_ms,
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
             }
         )
     keys = ["key_fact", "citation_match", "idk", "grounded", "attempts", "latency_ms"]
+    keys += ["input_tokens", "output_tokens"]
     return _means(rows, keys), rows
 
 
