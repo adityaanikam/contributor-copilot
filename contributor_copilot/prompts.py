@@ -37,3 +37,30 @@ def answer_messages(question: str, hits: list[Hit]) -> list[BaseMessage]:
         SystemMessage(ANSWER_SYSTEM),
         HumanMessage(f"Sources:\n\n{format_sources(hits)}\n\nQuestion: {question}"),
     ]
+
+
+REWRITE_SYSTEM = """You turn a contributor's question into a search query for a project's docs and issues.
+Keep command names, flags, file names, environment variables and error messages exactly as written.
+Reply with the query only, on one line."""
+
+
+def rewrite_messages(question: str, previous_query: str | None = None) -> list[BaseMessage]:
+    text = f"Question: {question}"
+    if previous_query:
+        text += (
+            f"\n\nThe query {previous_query!r} did not find sources that support an answer. "
+            "Write a different query."
+        )
+    return [SystemMessage(REWRITE_SYSTEM), HumanMessage(text)]
+
+
+GRADE_SYSTEM = """You check whether an answer is grounded in sources.
+Reply YES if every factual statement in the answer is supported by the numbered sources. Otherwise reply NO.
+Reply with one word: YES or NO."""
+
+
+def grade_messages(hits: list[Hit], answer: str) -> list[BaseMessage]:
+    return [
+        SystemMessage(GRADE_SYSTEM),
+        HumanMessage(f"Sources:\n\n{format_sources(hits)}\n\nAnswer: {answer}"),
+    ]

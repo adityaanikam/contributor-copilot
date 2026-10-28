@@ -5,6 +5,9 @@ like ChatOllama. It recognises our prompts by their system message:
 
 - answer: returns the source sentence that shares the most words with the
   question, followed by its citation, or "I don't know" when nothing matches.
+- rewrite: returns the question as the query; on a retry, its keywords only.
+- grade: YES when the answer (minus citations) is a sentence from the
+  sources it cites, otherwise NO.
 
 Token counts in usage_metadata are whitespace word counts, not real tokens.
 """
@@ -24,6 +27,8 @@ from contributor_copilot.bm25 import tokenize
 
 SOURCE_RE = re.compile(r'<source id="(\d+)"[^>]*>\n(.*?)\n</source>', re.DOTALL)
 QUESTION_RE = re.compile(r"^Question: (.*)$", re.MULTILINE)
+ANSWER_RE = re.compile(r"\nAnswer: (.*)\Z", re.DOTALL)
+CITATION_RE = re.compile(r"\[(\d+)\]")
 PARAGRAPH_RE = re.compile(r"\n\s*\n")
 SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -85,10 +90,37 @@ def _answer(user_message: str) -> str:
     return f"{sentence} [{number}]"
 
 
+def _rewrite(user_message: str) -> str:
+    question = QUESTION_RE.search(user_message).group(1)
+    if "did not find sources" in user_message:
+        return " ".join(tokenize(question))
+    return question
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _grade(user_message: str) -> str:
+    """YES when the answer, minus its citations, is a sentence of a cited source."""
+    answer = ANSWER_RE.search(user_message).group(1)
+    sources = parse_sources(user_message)
+    numbers = [int(n) for n in CITATION_RE.findall(answer)]
+    if not numbers or any(n not in sources for n in numbers):
+        return "NO"
+    claim = _normalize(CITATION_RE.sub("", answer))
+    cited_text = " ".join(_normalize(" ".join(sentences(sources[n]))) for n in numbers)
+    return "YES" if claim and claim in cited_text else "NO"
+
+
 def scripted_respond(messages: list[BaseMessage]) -> str:
     system, user = messages[0].content, messages[-1].content
     if system == prompts.ANSWER_SYSTEM:
         return _answer(user)
+    if system == prompts.REWRITE_SYSTEM:
+        return _rewrite(user)
+    if system == prompts.GRADE_SYSTEM:
+        return _grade(user)
     raise ValueError("FakeChatModel got a prompt it does not know")
 
 
