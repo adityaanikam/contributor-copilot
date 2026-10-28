@@ -4,19 +4,24 @@
                 ^                                 |
                 +------------- retry -------------+
                                                   +--out of attempts--> give_up -> END
+
+Each node is timed, and every LLM call goes through the request's
+RequestTrace, passed in as config["configurable"]["trace"].
 """
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from contributor_copilot.answer import CITATION_RE, Citation, generate_answer, is_idk
 from contributor_copilot.bm25 import Hit
 from contributor_copilot.prompts import I_DONT_KNOW, grade_messages, rewrite_messages
 from contributor_copilot.retriever import HybridRetriever
+from contributor_copilot.telemetry import RequestTrace
 
 
 class State(TypedDict, total=False):
@@ -36,12 +41,21 @@ def citations_are_valid(answer: str, source_count: int) -> bool:
     return bool(numbers) and all(1 <= n <= source_count for n in numbers)
 
 
+def _timed(name: str, node: Callable[[State, RequestTrace], State]):
+    def run(state: State, config: RunnableConfig) -> State:
+        trace = config.get("configurable", {}).get("trace") or RequestTrace()
+        with trace.stage(name):
+            return node(state, trace)
+
+    return run
+
+
 def build_graph(retriever: HybridRetriever, llm: BaseChatModel, max_attempts: int = 2):
     """Compile the graph. max_attempts=2 means the first try plus one retry."""
 
-    def rewrite(state: State) -> State:
-        reply = llm.invoke(rewrite_messages(state["question"], state.get("query")))
-        lines = str(reply.content).strip().splitlines()
+    def rewrite(state: State, trace: RequestTrace) -> State:
+        messages = rewrite_messages(state["question"], state.get("query"))
+        lines = str(trace.invoke(llm, messages, "rewrite").content).strip().splitlines()
         query = lines[0].strip() if lines else ""
         query = query or state["question"]
         return {
@@ -50,24 +64,24 @@ def build_graph(retriever: HybridRetriever, llm: BaseChatModel, max_attempts: in
             "attempts": state.get("attempts", 0) + 1,
         }
 
-    def retrieve(state: State) -> State:
+    def retrieve(state: State, trace: RequestTrace) -> State:
         # Fuse the original question with the rewrite so a bad rewrite cannot
         # lose what the question alone would find. Rerank against the question.
         queries = [state["question"], state["query"]]
         return {"hits": retriever.retrieve(queries, rerank_query=state["question"])}
 
-    def generate(state: State) -> State:
-        answer = generate_answer(state["question"], state["hits"], llm)
+    def generate(state: State, trace: RequestTrace) -> State:
+        answer = generate_answer(state["question"], state["hits"], llm, trace)
         return {"answer": answer.text, "citations": answer.citations}
 
-    def check(state: State) -> State:
+    def check(state: State, trace: RequestTrace) -> State:
         answer, hits = state["answer"], state["hits"]
         if is_idk(answer) or not citations_are_valid(answer, len(hits)):
             return {"grounded": False}
-        verdict = str(llm.invoke(grade_messages(hits, answer)).content)
+        verdict = str(trace.invoke(llm, grade_messages(hits, answer), "check").content)
         return {"grounded": verdict.strip().upper().startswith("YES")}
 
-    def give_up(state: State) -> State:
+    def give_up(state: State, trace: RequestTrace) -> State:
         return {"answer": I_DONT_KNOW, "citations": []}
 
     def route(state: State) -> str:
@@ -76,11 +90,14 @@ def build_graph(retriever: HybridRetriever, llm: BaseChatModel, max_attempts: in
         return "retry" if state["attempts"] < max_attempts else "give_up"
 
     graph = StateGraph(State)
-    graph.add_node("rewrite", rewrite)
-    graph.add_node("retrieve", retrieve)
-    graph.add_node("generate", generate)
-    graph.add_node("check", check)
-    graph.add_node("give_up", give_up)
+    for name, node in [
+        ("rewrite", rewrite),
+        ("retrieve", retrieve),
+        ("generate", generate),
+        ("check", check),
+        ("give_up", give_up),
+    ]:
+        graph.add_node(name, _timed(name, node))
     graph.add_edge(START, "rewrite")
     graph.add_edge("rewrite", "retrieve")
     graph.add_edge("retrieve", "generate")

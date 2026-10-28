@@ -124,6 +124,7 @@ def test_evaluate_answers_scores_each_question(retriever, tmp_path):
     )
     metrics, rows = evaluate_answers(Copilot(retriever, make_fake_llm()), questions)
     assert {"key_fact", "citation_match", "idk", "grounded", "attempts", "latency_ms"} <= set(metrics)
+    assert metrics["input_tokens"] > 0 and metrics["output_tokens"] > 0
     off_topic = rows[-1]
     assert off_topic["idk"] == 1.0 and off_topic["key_fact"] == 1.0 and off_topic["citation_match"] == 1.0
     doctor = next(r for r in rows if r["id"] == "doctor-timeout")

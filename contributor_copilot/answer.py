@@ -9,6 +9,7 @@ from langchain_core.language_models import BaseChatModel
 
 from contributor_copilot.bm25 import Hit
 from contributor_copilot.prompts import I_DONT_KNOW, answer_messages
+from contributor_copilot.telemetry import RequestTrace
 
 CITATION_RE = re.compile(r"\[(\d+)\]")
 
@@ -61,10 +62,13 @@ def resolve_citations(text: str, hits: list[Hit]) -> list[Citation]:
     return citations
 
 
-def generate_answer(question: str, hits: list[Hit], llm: BaseChatModel) -> Answer:
+def generate_answer(
+    question: str, hits: list[Hit], llm: BaseChatModel, trace: RequestTrace | None = None
+) -> Answer:
     if not hits:
         return Answer(I_DONT_KNOW)
-    reply = llm.invoke(answer_messages(question, hits))
+    messages = answer_messages(question, hits)
+    reply = trace.invoke(llm, messages, "generate") if trace else llm.invoke(messages)
     text = str(reply.content).strip()
     if is_idk(text):
         return Answer(text)

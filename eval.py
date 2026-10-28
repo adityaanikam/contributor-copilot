@@ -37,6 +37,8 @@ COLUMNS = [
     ("IDK", "idk"),
     ("grounded", "grounded"),
     ("latency ms", "latency_ms"),
+    ("tokens in", "input_tokens"),
+    ("tokens out", "output_tokens"),
 ]
 
 

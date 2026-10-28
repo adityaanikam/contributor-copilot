@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 
@@ -20,6 +21,7 @@ from contributor_copilot.ingest import build_chunks
 from contributor_copilot.llm import get_llm
 from contributor_copilot.rerank import CrossEncoderReranker, Reranker
 from contributor_copilot.retriever import HybridRetriever
+from contributor_copilot.telemetry import RequestTrace, Usage, append_jsonl
 
 
 @dataclass
@@ -36,29 +38,58 @@ class AskResult:
     citations: list[Citation]
     grounded: bool
     attempts: int
+    usage: Usage
     queries: list[str] = field(default_factory=list)
     retrieved: list[RetrievedSource] = field(default_factory=list)
 
 
 class Copilot:
-    def __init__(self, retriever: HybridRetriever, llm: BaseChatModel, max_attempts: int = 2):
+    def __init__(
+        self,
+        retriever: HybridRetriever,
+        llm: BaseChatModel,
+        max_attempts: int = 2,
+        log_path: Path | None = None,
+    ):
         self.retriever = retriever
         self.llm = llm
+        self.log_path = log_path
         self.graph = build_graph(retriever, llm, max_attempts=max_attempts)
 
     def ask(self, question: str) -> AskResult:
-        state = self.graph.invoke({"question": question})
-        return AskResult(
+        """Run the graph, then log tokens and latency (also when it fails)."""
+        trace = RequestTrace()
+        try:
+            state = self.graph.invoke({"question": question}, {"configurable": {"trace": trace}})
+        except Exception as error:
+            self._log(trace.record(question=question, error=repr(error)))
+            raise
+        result = AskResult(
             question=question,
             answer=state["answer"],
             citations=state["citations"],
             grounded=state["grounded"],
             attempts=state["attempts"],
+            usage=trace.usage(),
             queries=state["queries"],
             retrieved=[
                 RetrievedSource(h.chunk.location, h.chunk.section, h.score) for h in state["hits"]
             ],
         )
+        self._log(
+            trace.record(
+                question=question,
+                answer=result.answer,
+                citations=[c.location for c in result.citations],
+                grounded=result.grounded,
+                attempts=result.attempts,
+            )
+        )
+        return result
+
+    def _log(self, record: dict) -> None:
+        if self.log_path is not None:
+            append_jsonl(self.log_path, record)
 
 
 def build_retriever(
@@ -93,4 +124,4 @@ def build_retriever(
 
 
 def build_copilot(settings: Settings) -> Copilot:
-    return Copilot(build_retriever(settings), get_llm(settings))
+    return Copilot(build_retriever(settings), get_llm(settings), log_path=settings.log_path)
