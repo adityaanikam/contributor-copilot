@@ -148,3 +148,4 @@ def test_log_run_writes_a_local_mlflow_file_store(tmp_path):
     artifacts = [a.path for a in mlflow.MlflowClient().list_artifacts(run_id)]
     assert artifacts == ["retrieval.json"]
     assert os.environ["MLFLOW_ALLOW_FILE_STORE"] == "true"
+    assert os.environ["MLFLOW_DISABLE_TELEMETRY"] == "true"
