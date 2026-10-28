@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 
 from langchain_core.language_models import BaseChatModel
 
-from contributor_copilot.answer import Citation, generate_answer
+from contributor_copilot.answer import Citation
 from contributor_copilot.bm25 import BM25Index
 from contributor_copilot.config import Settings
 from contributor_copilot.dense import ChromaStore, SentenceTransformerEmbedder, collection_name
+from contributor_copilot.graph import build_graph
 from contributor_copilot.ingest import build_chunks
 from contributor_copilot.llm import get_llm
 from contributor_copilot.rerank import CrossEncoderReranker
@@ -28,22 +29,30 @@ class AskResult:
     question: str
     answer: str
     citations: list[Citation]
+    grounded: bool
+    attempts: int
+    queries: list[str] = field(default_factory=list)
     retrieved: list[RetrievedSource] = field(default_factory=list)
 
 
 class Copilot:
-    def __init__(self, retriever: HybridRetriever, llm: BaseChatModel):
+    def __init__(self, retriever: HybridRetriever, llm: BaseChatModel, max_attempts: int = 2):
         self.retriever = retriever
         self.llm = llm
+        self.graph = build_graph(retriever, llm, max_attempts=max_attempts)
 
     def ask(self, question: str) -> AskResult:
-        hits = self.retriever.retrieve(question)
-        answer = generate_answer(question, hits, self.llm)
+        state = self.graph.invoke({"question": question})
         return AskResult(
             question=question,
-            answer=answer.text,
-            citations=answer.citations,
-            retrieved=[RetrievedSource(h.chunk.location, h.chunk.section, h.score) for h in hits],
+            answer=state["answer"],
+            citations=state["citations"],
+            grounded=state["grounded"],
+            attempts=state["attempts"],
+            queries=state["queries"],
+            retrieved=[
+                RetrievedSource(h.chunk.location, h.chunk.section, h.score) for h in state["hits"]
+            ],
         )
 
 

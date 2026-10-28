@@ -56,11 +56,9 @@ def test_cli_prints_answer_and_citation_urls(settings, monkeypatch, capsys):
 
 
 def test_ask_passes_llm_errors_through(settings):
-    copilot = service.build_copilot(settings)
-
     def boom(messages):
         raise RuntimeError("model crashed")
 
-    copilot.llm = FakeChatModel(respond=boom)
+    copilot = service.Copilot(service.build_retriever(settings), FakeChatModel(respond=boom))
     with pytest.raises(RuntimeError):
         copilot.ask("What does apm doctor check?")
