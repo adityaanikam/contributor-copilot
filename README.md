@@ -15,7 +15,7 @@ No API keys and no paid services.
 | Issue export | `scripts/export_issues.py` | Saves issues and merged PRs to `data/issues.jsonl` with the `gh` CLI. You run it locally. |
 | Ingest | `contributor_copilot/ingest.py` | Loads README.md, CONTRIBUTING.md, GOVERNANCE.md and every `.md`/`.mdx` under `docs/` (plus issues if exported), splits them with LangChain's markdown-aware recursive splitter, and records file, line range, heading path and a GitHub URL for each chunk. |
 | Retrieval | `bm25.py`, `dense.py`, `fusion.py`, `rerank.py`, `retriever.py` | BM25 (rank_bm25) and dense search (BAAI/bge-small-en-v1.5 in embedded Chroma), merged with reciprocal rank fusion, then reranked with cross-encoder/ms-marco-MiniLM-L-6-v2. Dense search and reranking can each be turned off. |
-| Answer flow | `graph.py` | LangGraph: rewrite the question, retrieve, answer with `[n]` citations, check the answer is grounded in the chunks, retry once, otherwise answer "I don't know". |
+| Answer flow | `graph.py` | LangGraph: rewrite the question, retrieve, answer with `[n]` citations, check the answer is grounded in the chunks, retry once. If the check still fails, the answer is kept with `grounded: false` when it cites real sources, otherwise "I don't know". |
 | Guardrail | `guardrails.py` | Strips invisible Unicode and redacts paragraphs in retrieved text that read like instructions to the assistant ("ignore previous instructions", "you are now", ...) before the model sees them. |
 | Telemetry | `telemetry.py` | Tokens and latency per LLM call and per graph stage, returned in the API response and appended to `logs/requests.jsonl`. |
 | API | `api.py` | FastAPI: `POST /ask`, `GET /health`. |
@@ -114,6 +114,7 @@ All settings are environment variables (see `contributor_copilot/config.py`).
 | `COPILOT_OLLAMA_MODEL` | `llama3.2:3b` | Any model you have pulled. |
 | `COPILOT_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server. |
 | `COPILOT_OLLAMA_NUM_CTX` | `8192` | Context window passed to Ollama. |
+| `COPILOT_OLLAMA_NUM_PREDICT` | `512` | Most tokens Ollama may generate per call, so one looping generation cannot hang a request. |
 | `COPILOT_EMBEDDINGS` | `bge` | `bge` for BM25 + dense, `none` for BM25 only. |
 | `COPILOT_RERANK` | `1` | `0` turns the cross-encoder off. |
 | `COPILOT_CHUNK_SIZE` / `COPILOT_CHUNK_OVERLAP` | `1000` / `150` | Characters. |
@@ -133,7 +134,8 @@ All settings are environment variables (see `contributor_copilot/config.py`).
   `docs/src/content/docs/reference/cli/doctor.md:8-21`, heading path and a
   GitHub URL pinned to the corpus commit with a line anchor.
 - `grounded`, `attempts`, `queries`: outcome of the grounding check, number of
-  tries (1 or 2) and the rewritten search queries.
+  tries (1 or 2) and the rewritten search queries. `grounded: false` with citations
+  means the check rejected the answer and it is returned unverified.
 - `flagged_sources`: chunks the injection guardrail redacted.
 - `usage`: request id, input and output tokens, number of LLM calls, total
   latency and latency per graph stage.
@@ -143,10 +145,42 @@ If Ollama is not reachable the endpoint returns 503.
 
 ## Evaluation results
 
+### Full local pipeline (hybrid retrieval, reranker, Llama 3.2 3B)
+
+Run on a Windows machine without a GPU (Ollama reported 100% CPU) on
+2026-10-29: BAAI/bge-small-en-v1.5 embeddings, the cross-encoder reranker and
+`llama3.2:3b`, with the corpus at the commit above, 8 questions, one run.
+
+```
+python eval.py --chunk-sizes 1000 --rerank on
+```
+
+| chunk | rerank | retrieval | hit@1 | hit@3 | hit@5 | MRR | key fact | citation | IDK | grounded | latency ms | tokens in | tokens out |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1000 | on | hybrid+rerank | 0.875 | 0.875 | 1.000 | 0.906 | 0.938 | 0.875 | 0.000 | 0.000 | 52484 | 4808 | 251 |
+
+What this shows:
+
+- Retrieval puts the expected source in the top five for every question.
+- The answers contain the expected facts for 7 of 8 questions and half of the
+  facts for the eighth (`gitlab-token`), and none of the 8 answers is "I don't know".
+- `grounded` is 0.000. The grounding check is done by the same 3B model, and
+  it answered `NO` for every answer, including the correct ones such as
+  `apm install --frozen` for the CI question. So the check does not work with
+  this model: answers are returned flagged `grounded: false` after one retry
+  instead of being verified. Use a larger model for the check, or treat the flag
+  as unreliable.
+- Answers take about 52 s each on CPU. Until `COPILOT_OLLAMA_NUM_PREDICT`
+  capped generation, one looping generation could hang a request indefinitely (one ran for over 40 minutes).
+
+The numbers come from a single run at temperature 0 with a fixed seed, on 8
+questions, so one question moves a metric by 0.125.
+
+### BM25 only (earlier run)
+
 Measured in the build environment. Hugging Face, the Ollama registry and the
 PyTorch download index were blocked there, so no embedding model, reranker or
-LLM could run. Only BM25 retrieval was measured; answer metrics, rerank on,
-and hybrid retrieval were not.
+LLM could run. Only BM25 retrieval was measured in that run.
 
 Command (retrieval only, BM25, rerank off; corpus at the commit above):
 
@@ -175,7 +209,7 @@ Chunk counts for the same corpus: 6047, 3015 and 1424 chunks at sizes 500,
 
 ## Tests
 
-138 tests, all offline: they use a rule-based fake LLM (`fake_llm.py`),
+140 tests, all offline: they use a rule-based fake LLM (`fake_llm.py`),
 BM25 or a hashing embedder instead of downloaded models, and temp
 directories for Chroma and MLflow. They pass with networking disabled
 (`unshare -rn`). Two tests build tiny random BERT models locally to check

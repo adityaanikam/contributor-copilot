@@ -14,7 +14,8 @@ question
   -> check (deterministic citation check, then LLM grader says YES or NO)
        grounded            -> return answer
        not grounded, try 1 -> back to rewrite with the failed query
-       not grounded, try 2 -> "I don't know based on the provided sources."
+       not grounded, try 2 -> keep the answer with grounded=false if it cites real
+                              sources, otherwise "I don't know based on the provided sources."
 ```
 
 Every LLM call and every stage is timed and token-counted by a `RequestTrace`.
@@ -163,6 +164,10 @@ The LangGraph `StateGraph` with nodes `rewrite`, `retrieve`, `generate`,
   citation, or a citation to a source that does not exist all count as not
   grounded, without calling the model). Only then does it ask the LLM grader.
 - `max_attempts=2` means the first try plus one retry.
+- `give_up` runs when the retry is also rejected. If the last answer is not
+  "I don't know" and its citations are valid, it is kept and `grounded` stays
+  false; otherwise the answer becomes "I don't know". This exists because the
+  3B grader rejected every answer in the eval, including correct ones.
 - `_timed` wraps each node so its latency lands in the request's trace; the
   trace arrives through LangGraph's `config["configurable"]`.
 Why: the brief asked for rewrite, retrieve, grounding check, one retry, else
@@ -299,7 +304,7 @@ virtualenv out of git.
 | `test_retriever.py` | BM25-only, hybrid, rerank and multi-query modes. |
 | `test_answer.py` | Citation parsing and resolution, source formatting, "I don't know". |
 | `test_fake_llm.py` | Each fake behaviour, token counts, provider selection. |
-| `test_graph.py` | Grounded first try, retry then grounded, give up, no retry with one attempt, cheap checks skip the grader, rewrite fusion. |
+| `test_graph.py` | Grounded first try, retry then grounded, keep a cited answer or give up, no retry with one attempt, cheap checks skip the grader, rewrite fusion. |
 | `test_service.py` | Wiring for BM25-only and hybrid+rerank, CLI output. |
 | `test_api.py` | `/health`, `/ask` citations, usage and log line, "I don't know", 422 and 503. |
 | `test_telemetry.py` | Token and latency accounting, retry counts, error logging. |
@@ -336,7 +341,10 @@ Cheap checks first: "I don't know", no citation, or a citation to a missing
 source fail immediately. Otherwise an LLM grader answers YES or NO on whether
 the sources support the answer. On NO, the graph rewrites the query with the
 failed one as a hint and tries again. One retry fixes a bad first retrieval;
-more retries mostly add latency, and "I don't know" is better than a guess.
+more retries mostly add latency. If the grader still says NO, a cited answer
+is returned flagged `grounded: false` (the CLI prints a note). With
+`llama3.2:3b` the grader said NO to all 8 eval answers, so on a small model that
+flag cannot be trusted and a larger grader model is the real fix.
 
 **6. How do you stop prompt injection in retrieved documents?**
 Three layers: the guardrail removes hidden Unicode and redacts paragraphs that
