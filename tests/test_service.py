@@ -53,6 +53,16 @@ def test_cli_prints_answer_and_citation_urls(settings, monkeypatch, capsys):
     assert "GITLAB_APM_PAT" in out
     assert "consumer/authentication.md:" in out
     assert "https://github.com/microsoft/apm/blob/main/" in out
+    assert "grounding check did not confirm" not in out
+
+
+def test_cli_warns_when_a_cited_answer_failed_the_grounding_check(settings, capsys):
+    result = service.build_copilot(settings).ask("Which variable holds the token for GitLab packages?")
+    result.grounded = False
+    assert "grounding check did not confirm" in cli.render(result)
+
+    result.citations = []
+    assert "grounding check did not confirm" not in cli.render(result)
 
 
 def test_ask_passes_llm_errors_through(settings):

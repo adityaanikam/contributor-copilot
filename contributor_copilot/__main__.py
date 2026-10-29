@@ -13,6 +13,9 @@ def render(result: AskResult) -> str:
     for citation in result.citations:
         lines.append(f"[{citation.number}] {citation.location}  ({citation.section})")
         lines.append(f"    {citation.url}")
+    if result.citations and not result.grounded:
+        lines.append("")
+        lines.append("Note: the grounding check did not confirm this answer. Check the sources.")
     return "\n".join(lines).rstrip()
 
 

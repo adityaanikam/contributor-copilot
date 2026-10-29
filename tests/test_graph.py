@@ -66,20 +66,29 @@ def test_retry_once_then_grounded(retriever):
     assert len(state["queries"]) == 2 and state["queries"][0] != state["queries"][1]
 
 
-def test_gives_up_with_i_dont_know_after_two_ungrounded_answers(retriever):
+def test_keeps_the_last_cited_answer_flagged_ungrounded_after_two_rejections(retriever):
     llm = scripted(["Wrong [1].", "Still wrong [2]."], grades=["NO", "NO"])
     state = build_graph(retriever, llm).invoke({"question": QUESTION})
     assert state["grounded"] is False
     assert state["attempts"] == 2
-    assert state["answer"] == I_DONT_KNOW
-    assert state["citations"] == []
+    assert state["answer"] == "Still wrong [2]."
+    assert [c.number for c in state["citations"]] == [2]
 
 
 def test_max_attempts_one_disables_retry(retriever):
     llm = scripted(["Wrong [1]."], grades=["NO"])
     state = build_graph(retriever, llm, max_attempts=1).invoke({"question": QUESTION})
     assert state["attempts"] == 1
+    assert state["grounded"] is False
+    assert state["answer"] == "Wrong [1]."
+
+
+def test_gives_up_when_the_rejected_answer_has_no_valid_citation(retriever):
+    llm = scripted(["Uncited claim.", "Cites a missing source [9]."], grades=[])
+    state = build_graph(retriever, llm).invoke({"question": QUESTION})
+    assert state["grounded"] is False
     assert state["answer"] == I_DONT_KNOW
+    assert state["citations"] == []
 
 
 def test_idk_and_bad_citations_skip_the_grader(retriever):

@@ -97,6 +97,12 @@ def build_graph(
         return {"grounded": verdict.strip().upper().startswith("YES")}
 
     def give_up(state: State, trace: RequestTrace) -> State:
+        # The grader rejected the answer, but it is a real answer with valid citations. A small
+        # local model is an unreliable judge, so keep the answer and leave grounded False
+        # instead of throwing it away. Answers that abstain or cite missing sources are dropped.
+        answer = state["answer"]
+        if not is_idk(answer) and citations_are_valid(answer, len(state["hits"])):
+            return {"answer": answer, "citations": state["citations"]}
         return {"answer": I_DONT_KNOW, "citations": []}
 
     def route(state: State) -> str:
