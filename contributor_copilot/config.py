@@ -27,6 +27,8 @@ class Settings:
     ollama_model: str = "llama3.2:3b"
     ollama_base_url: str = "http://localhost:11434"
     ollama_num_ctx: int = 8192
+    # Upper bound on generated tokens per call, so one looping generation cannot hang a request.
+    ollama_num_predict: int = 512
 
     # "bge" = hybrid BM25 + dense retrieval, "none" = BM25 only.
     embeddings: str = "bge"
@@ -66,6 +68,7 @@ class Settings:
             ollama_model=get("OLLAMA_MODEL", defaults.ollama_model),
             ollama_base_url=get("OLLAMA_BASE_URL", defaults.ollama_base_url),
             ollama_num_ctx=get("OLLAMA_NUM_CTX", defaults.ollama_num_ctx, int),
+            ollama_num_predict=get("OLLAMA_NUM_PREDICT", defaults.ollama_num_predict, int),
             embeddings=get("EMBEDDINGS", defaults.embeddings).lower(),
             embedding_model=get("EMBEDDING_MODEL", defaults.embedding_model),
             rerank=get("RERANK", defaults.rerank, _as_bool),

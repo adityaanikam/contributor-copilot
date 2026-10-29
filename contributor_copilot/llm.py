@@ -20,4 +20,5 @@ def get_llm(settings: Settings) -> BaseChatModel:
         temperature=0,
         seed=0,
         num_ctx=settings.ollama_num_ctx,
+        num_predict=settings.ollama_num_predict,
     )
